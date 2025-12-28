@@ -1,0 +1,14 @@
+[package]
+name = "rootcause-opentelemetry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio.version = "1.48"
+tokio.features = [ "rt", "rt-multi-thread", "macros" ]
+rootcause = "0.11"
+rootcause-backtrace = "0.11"
+opentelemetry.version = "0.31"
+opentelemetry.features = [ "futures" ]
+opentelemetry_sdk = "0.31"
+opentelemetry-stdout = "0.31"
