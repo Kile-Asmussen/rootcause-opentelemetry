@@ -12,3 +12,5 @@ opentelemetry.version = "0.31"
 opentelemetry.features = [ "futures" ]
 opentelemetry_sdk = "0.31"
 opentelemetry-stdout = "0.31"
+serde = "1.0"
+serde_json = "1.0"

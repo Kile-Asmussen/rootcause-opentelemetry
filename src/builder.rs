@@ -1,49 +1,50 @@
 
-use opentelemetry::{StringValue, trace::Status};
+use opentelemetry::{Context, StringValue, trace::{Span, Status, TraceContextExt}};
 use rootcause::{Report, ReportRef, markers::{ObjectMarkerFor, ReportOwnershipMarker}};
 use std::{any::TypeId, time::SystemTime};
 
-use crate::{OTelEventSpec, spec::OTelEventConfig};
+use crate::{ExceptionEventSpec, span::SpanTraitExt, span::SpanRefExt, spec::ExceptionEventConfig};
 
-pub trait OTelEventBuilder: Sized {
+pub trait ExceptionEventBuilder: Sized {
     type Context: 'static;
-    type ObjectMarker: 'static + ObjectMarkerFor<Self::Context> + ReportOwnershipMarker;
+    type ObjectMarker: 'static + ReportOwnershipMarker;
     type ThreadSafety: 'static;
 
     type WrappedReport;
     
     fn send(self) -> Self::WrappedReport;
+    fn send_to(self, span: &mut impl Span) -> Self::WrappedReport;
 
-    fn underlying_report_ref<'a>(&'a self)
-        -> Option<ReportRef<'a, Self::Context,
+    fn underlying_report_ref(&self)
+        -> Option<ReportRef<'_, Self::Context,
             <Self::ObjectMarker as ReportOwnershipMarker>::RefMarker,
             Self::ThreadSafety>>;
 
-    fn spec(&mut self) -> Option<&mut OTelEventSpec>;
+    fn spec(&mut self) -> Option<&mut ExceptionEventSpec>;
 
     fn status(self, status: Status) -> Self;
 }
 
-pub struct OTelReportWrapper<C: 'static, O: 'static, T: 'static> {
+pub struct ReportWrapper<C: 'static, O: 'static, T: 'static> {
     report: Report<C, O, T>,
     status: Status,
-    spec: OTelEventSpec
+    spec: ExceptionEventSpec
 }
 
-impl<C: 'static, O: 'static, T: 'static> OTelReportWrapper<C, O, T> {
+impl<C: 'static, O: 'static, T: 'static> ReportWrapper<C, O, T> {
     pub(crate) fn new(report: Report<C, O, T>) -> Self {
         Self {
             report,
             status: Status::Unset,
-            spec: OTelEventSpec::default()
+            spec: ExceptionEventSpec::default()
         }
     }
 }
 
-impl<C, O, T> OTelEventBuilder for OTelReportWrapper<C, O, T>
+impl<C, O, T> ExceptionEventBuilder for ReportWrapper<C, O, T>
     where
         C: 'static,
-        O: 'static + ObjectMarkerFor<C> + ReportOwnershipMarker,
+        O: 'static + ReportOwnershipMarker,
         T: 'static,
 {
     type Context = C;
@@ -55,18 +56,34 @@ impl<C, O, T> OTelEventBuilder for OTelReportWrapper<C, O, T>
     type WrappedReport = Report<C, O, T>;
 
     fn send(self) -> Self::WrappedReport {
-        self.report
+        let Self { report, status, spec } = self;
+        let ctx = Context::current();
+        let span = ctx.span();
+        span.add_exception_event(report.as_ref(), spec);
+        if status != Status::Unset {
+            span.set_status(status);
+        }
+        report
     }
 
-    fn underlying_report_ref<'a>(&'a self)
-        -> Option<ReportRef<'a, Self::Context,
+    fn send_to(self, span: &mut impl Span) -> Self::WrappedReport {
+        let Self { report, status, spec } = self;
+        span.add_exception_event(report.as_ref(), spec);
+        if status != Status::Unset {
+            span.set_status(status);
+        }
+        report
+    }
+
+    fn underlying_report_ref(&self)
+        -> Option<ReportRef<'_, Self::Context,
             <Self::ObjectMarker as ReportOwnershipMarker>::RefMarker,
             Self::ThreadSafety>>
     {
         Some(self.report.as_ref())
     }
 
-    fn spec(&mut self) -> Option<&mut OTelEventSpec> {
+    fn spec(&mut self) -> Option<&mut ExceptionEventSpec> {
         Some(&mut self.spec)
     }
 
@@ -75,10 +92,10 @@ impl<C, O, T> OTelEventBuilder for OTelReportWrapper<C, O, T>
     }
 }
 
-impl<X, C, O, T> OTelEventBuilder for Result<X, OTelReportWrapper<C, O, T>>
+impl<X, C, O, T> ExceptionEventBuilder for Result<X, ReportWrapper<C, O, T>>
     where
         C: 'static,
-        O: 'static + ObjectMarkerFor<C> + ReportOwnershipMarker,
+        O: 'static + ReportOwnershipMarker,
         T: 'static,
 {
     type Context = C;
@@ -93,9 +110,16 @@ impl<X, C, O, T> OTelEventBuilder for Result<X, OTelReportWrapper<C, O, T>>
             Self::Err(r) => Err(r.send()),
         }
     }
+        
+    fn send_to(self, span: &mut impl Span) -> Self::WrappedReport {
+        match self {
+            Self::Ok(x) => Ok(x),
+            Self::Err(r) => Err(r.send_to(span)),
+        }
+    }
 
-    fn underlying_report_ref<'a>(&'a self)
-        -> Option<ReportRef<'a, Self::Context,
+    fn underlying_report_ref(&self)
+        -> Option<ReportRef<'_, Self::Context,
             <Self::ObjectMarker as ReportOwnershipMarker>::RefMarker,
             Self::ThreadSafety>>
     {
@@ -105,7 +129,7 @@ impl<X, C, O, T> OTelEventBuilder for Result<X, OTelReportWrapper<C, O, T>>
         }
     }
 
-    fn spec(&mut self) -> Option<&mut OTelEventSpec> {
+    fn spec(&mut self) -> Option<&mut ExceptionEventSpec> {
         match self {
             Self::Ok(_) => todo!(),
             Self::Err(r) => r.spec(),
@@ -147,6 +171,10 @@ macro_rules! impl_eventconfig_for_builder {
             self.spec().map(|s| s.backtrace()); self
         }
 
+        fn override_backtrace(mut self, backtrace: String) -> Self {
+            self.spec().map(|s| s.override_backtrace(backtrace)); self
+        }
+
         fn escaped(mut self, has_escaped: bool) -> Self {
             self.spec().map(|s| s.escaped(has_escaped)); self
         }
@@ -171,25 +199,25 @@ macro_rules! impl_eventconfig_for_builder {
             self.spec().map(|s| s.recurse()); self
         }
 
-        fn children(mut self, actions: OTelEventSpec) -> Self {
+        fn children(mut self, actions: ExceptionEventSpec) -> Self {
             self.spec().map(|s| s.children(actions)); self
         }
     };
 }
 
-impl<C, O, T> OTelEventConfig for OTelReportWrapper<C, O, T>
+impl<C, O, T> ExceptionEventConfig for ReportWrapper<C, O, T>
     where
         C: 'static,
-        O: 'static + ObjectMarkerFor<C> + ReportOwnershipMarker,
+        O: 'static + ReportOwnershipMarker,
         T: 'static,
 {
     impl_eventconfig_for_builder!();
 }
 
-impl<X, C, O, T> OTelEventConfig for Result<X, OTelReportWrapper<C, O, T>>
+impl<X, C, O, T> ExceptionEventConfig for Result<X, ReportWrapper<C, O, T>>
     where
         C: 'static,
-        O: 'static + ObjectMarkerFor<C> + ReportOwnershipMarker,
+        O: 'static + ReportOwnershipMarker,
         T: 'static,
 {
     impl_eventconfig_for_builder!();
