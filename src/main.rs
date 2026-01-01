@@ -14,12 +14,12 @@ use opentelemetry::{
 use rootcause::{Report, handlers, hooks::Hooks, markers::Mutable, report};
 use tokio;
 
-use crate::{attachments::ReportTimestamping, setup::*};
+use crate::{attachments::ReportTimestamps, setup::*};
 
 #[tokio::main]
 async fn main() -> Result<(), Report> {
     Hooks::new()
-        .attachment_collector(ReportTimestamping)
+        .attachment_collector(ReportTimestamps)
         .install()
         .expect("Failed to install Rootcause hooks");
 

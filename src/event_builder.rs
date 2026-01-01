@@ -7,7 +7,7 @@ use opentelemetry_semantic_conventions::trace::{
     EXCEPTION_MESSAGE, EXCEPTION_STACKTRACE, EXCEPTION_TYPE,
 };
 use rootcause::{
-    Report, ReportRef,
+    Report, ReportMut, ReportRef,
     hooks::builtin_hooks::location::{self, Location},
     markers::{Mutable, ReportOwnershipMarker},
 };
@@ -31,10 +31,10 @@ type BacktraceProducer<C, O: ReportOwnershipMarker, T> =
 type ReportRecursor<C, O: ReportOwnershipMarker, T> =
     fn(ReportRef<C, O::RefMarker, T>) -> Vec<ReportRef<C, O::RefMarker, T>>;
 #[allow(type_alias_bounds)]
-type EventBuilderProducer<C, O: ReportOwnershipMarker, T> =
-    fn(ReportRef<C, O::RefMarker, T>) -> EventConfig<C, O, T>;
+type EventConfProducer<C, O: ReportOwnershipMarker, T> =
+    fn(ReportRef<C, O::RefMarker, T>) -> Option<EventConfig<C, O, T>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EventConfig<C, O, T>
 where
     C: 'static,
@@ -46,11 +46,11 @@ where
     timestamp: TimestampProducer<C, O, T>,
     backtrace: StringProducer<C, O, T>,
     attribute_producers: Vec<AttributesProducer<C, O, T>>,
-    recursors: Vec<(ReportRecursor<C, O, T>, EventBuilderProducer<C, O, T>)>,
+    recursors: Vec<(ReportRecursor<C, O, T>, EventConfProducer<C, O, T>)>,
 }
 
 #[derive(Default, Debug)]
-struct SpanExceptionEvent {
+struct ExceptionEvent {
     timestamp: Option<SystemTime>,
     attributes: Vec<KeyValue>,
 }
@@ -108,16 +108,19 @@ where
         }
     }
 
-    fn build(&self, rep: ReportRef<C, O::RefMarker, T>, res: &mut Vec<SpanExceptionEvent>) {
+    fn build(&self, rep: ReportRef<C, O::RefMarker, T>, res: &mut Vec<ExceptionEvent>) {
         for (rec, conf) in self.recursors.iter().map(Clone::clone) {
             let subs = rec(rep);
             for sub in subs {
-                let conf = conf(sub);
-                conf.build(sub, res);
+                if let Some(conf) = conf(sub) {
+                    conf.build(sub, res);
+                } else {
+                    self.build(sub, res);
+                }
             }
         }
 
-        let mut this = SpanExceptionEvent::default();
+        let mut this = ExceptionEvent::default();
         let mut ok = false;
         this.timestamp = (self.timestamp)(rep);
         if let Some(msg) = (self.message)(rep) {
@@ -157,11 +160,26 @@ where
     O: 'static + ReportOwnershipMarker,
     T: 'static,
 {
-    fn new(rep: Report<C, O, T>) -> Self {
-        Self {
-            rep,
-            config: EventConfig::new(),
-        }
+    fn new(rep: Report<C, O, T>, config: EventConfig<C, O, T>) -> Self {
+        Self { rep, config }
+    }
+
+    fn config(&mut self) -> &mut EventConfig<C, O, T> {
+        &mut self.config
+    }
+
+    fn into_report(self) -> Report<C, O, T> {
+        self.rep
+    }
+
+    fn report_ref(&self) -> ReportRef<'_, C, O::RefMarker, T> {
+        self.rep.as_ref()
+    }
+}
+
+impl<C: 'static, T: 'static> EventBuilder<C, Mutable, T> {
+    fn report_mut(&mut self) -> ReportMut<'_, C, T> {
+        self.rep.as_mut()
     }
 }
 
@@ -246,7 +264,7 @@ where
     type Builder = EventBuilder<C, O, T>;
 
     fn otel(self) -> Self::Builder {
-        EventBuilder::new(self)
+        EventBuilder::new(self, EventConfig::new())
     }
 }
 
@@ -265,6 +283,6 @@ where
     type Builder = Result<X, EventBuilder<C, O, T>>;
 
     fn otel(self) -> Self::Builder {
-        self.map_err(EventBuilder::new)
+        self.map_err(|e| e.otel())
     }
 }
