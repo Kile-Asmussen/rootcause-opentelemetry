@@ -1,46 +1,48 @@
-
 #![allow(unused)]
 
-use opentelemetry::{global::{self, ObjectSafeSpan, ObjectSafeTracerProvider}, trace::{FutureExt, Tracer}};
+mod attachments;
+mod event_builder;
+mod setup;
+
+use std::thread::current;
+
+use opentelemetry::{
+    Context,
+    global::{self, ObjectSafeSpan, ObjectSafeTracerProvider},
+    trace::{FutureExt, Span, TraceContextExt, Tracer},
+};
 use rootcause::{Report, handlers, hooks::Hooks, markers::Mutable, report};
 use tokio;
 
-
-use crate::{builder::ExceptionEventBuilder, reports::{ReportExt, SystemTimeCollector}, setup::*, spec::ExceptionEventSpec};
-
-mod attachments;
-mod builder;
-mod reports;
-mod setup;
-mod span;
-mod spec;
+use crate::{attachments::ReportTimestamping, setup::*};
 
 #[tokio::main]
 async fn main() -> Result<(), Report> {
     Hooks::new()
-        .attachment_collector(SystemTimeCollector)
+        .attachment_collector(ReportTimestamping)
         .install()
-        .expect("Failed to install hooks");
+        .expect("Failed to install Rootcause hooks");
 
     let trace_system = trace_system();
-    
+
     let tracer = global::tracer("rootcause_opentelemetry");
+    {
+        let _ctx = Context::current().with_span(tracer.start("test")).attach();
 
-    let mut span = tracer.start("do_report_things");
+        do_report_things().with_current_context().await?;
+    }
 
-    do_report_things().with_current_context().await?;
-    
-    span.end();
-
+    trace_system.force_flush();
     trace_system.shutdown()?;
     Ok(())
 }
 
 async fn do_report_things() -> Result<(), Report> {
+    let mut rep = Report::<i32>::new_custom::<handlers::Display>(10i32);
 
-    let rep = Report::<i32>::new_custom::<handlers::Debug>(10i32);
+    rep = rep.attach("This is a test");
 
-    rep.otel().send();
+    let ctx = Context::current().attach();
 
     Ok(())
 }

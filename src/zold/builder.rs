@@ -1,6 +1,6 @@
 
-use opentelemetry::{Context, StringValue, trace::{Span, Status, TraceContextExt}};
-use rootcause::{Report, ReportRef, markers::{ObjectMarkerFor, ReportOwnershipMarker}};
+use opentelemetry::{Context, StringValue, Key, Value, trace::{Span, Status, TraceContextExt}};
+use rootcause::{Report, ReportRef, markers::{ObjectMarkerFor, ReportOwnershipMarker}, hooks::builtin_hooks::location::Location};
 use std::{any::TypeId, time::SystemTime};
 
 use crate::{ExceptionEventSpec, span::SpanTraitExt, span::SpanRefExt, spec::ExceptionEventConfig};
@@ -175,14 +175,6 @@ macro_rules! impl_eventconfig_for_builder {
             self.spec().map(|s| s.override_backtrace(backtrace)); self
         }
 
-        fn escaped(mut self, has_escaped: bool) -> Self {
-            self.spec().map(|s| s.escaped(has_escaped)); self
-        }
-
-        fn add_attacment(mut self, at: impl Into<StringValue>) -> Self {
-            self.spec().map(|s| s.add_attacment(at)); self
-        }
-
         fn all_attachments(mut self) -> Self {
             self.spec().map(|s| s.all_attachments()); self
         }
@@ -201,6 +193,22 @@ macro_rules! impl_eventconfig_for_builder {
 
         fn children(mut self, actions: ExceptionEventSpec) -> Self {
             self.spec().map(|s| s.children(actions)); self
+        }
+
+        fn attributes(mut self) -> Self {
+            self.spec().map(|s| s.attributes()); self
+        }
+
+        fn add_attribute(mut self, key: impl Into<Key>, value: impl Into<Value>) -> Self {
+            self.spec().map(|s| s.add_attribute(key, value)); self
+        }
+
+        fn location(mut self) -> Self {
+            self.spec().map(|s| s.location()); self
+        }
+
+        fn set_location(mut self, loc: Location) -> Self {
+            self.spec().map(|s| s.set_location(loc)); self
         }
     };
 }

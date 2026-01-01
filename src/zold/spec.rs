@@ -1,6 +1,7 @@
 use std::{any::TypeId, backtrace, time::SystemTime};
 
-use opentelemetry::StringValue;
+use opentelemetry::{Key, KeyValue, StringValue, Value};
+use rootcause::hooks::builtin_hooks::location::Location;
 
 use crate::attachments::AttachmentAction;
 
@@ -29,18 +30,18 @@ pub trait ExceptionEventConfig: Sized {
     /// Derive the `exception.stacktrace` from the backtrace attachment
     fn override_backtrace(self, backtrace: String) -> Self;
 
-    /// Specify the `exception.escaped` attribute
-    fn escaped(self, has_escaped: bool) -> Self;
-
-    /// Include a custom element in the `exception.extra` attribute
-    fn add_attacment(self, at: impl Into<StringValue>) -> Self;
-
     /// Include a custom element in the `exception.extra` attribute
     fn all_attachments(self) -> Self;
 
-    /// Include all attachments that are not `Backtrace`` and `SystemTime`
+    /// Include all attachments that are not `Backtrace`, `SystemTime`, or `KeyVal`
     /// in the `exception.extra` attribute
-    fn attachments(self) -> Self;
+    fn attachments(self) -> Self; 
+
+    /// Include attachments of type `KeyValue` in the attributes of the event
+    fn attributes(self) -> Self;
+
+    /// Include an attribute in the event
+    fn add_attribute(self, key: impl Into<Key>, value: impl Into<Value>) -> Self;
 
     /// Include all attachments that of the given type ID
     /// in the `exception.extra` attribute
@@ -50,6 +51,10 @@ pub trait ExceptionEventConfig: Sized {
     fn attachments_of_type<T: 'static>(self) -> Self {
         self.attachments_of_type_id(TypeId::of::<T>())
     }
+
+    // Derive location 
+    fn location(self) -> Self;
+    fn set_location(self, loc: impl Into<StringValue>) -> Self;
     
     /// Use the current configuration to create events for
     /// all child reports
@@ -60,14 +65,16 @@ pub trait ExceptionEventConfig: Sized {
     fn children(self, actions: ExceptionEventSpec) -> Self;
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ExceptionEventSpec {
     pub(crate) ex_type: Option3<StringValue>,
     pub(crate) custom_message: Option<StringValue>,
+    pub(crate) location: Option3<StringValue>,
     pub(crate) timestamp: Option3<Option<SystemTime>>,
     pub(crate) backtrace: Option3<String>,
-    pub(crate) escaped: Option<bool>,
     pub(crate) attachments: Vec<AttachmentAction>,
+    pub(crate) attributes: bool,
+    pub(crate) extra_attributes: Vec<KeyValue>,
     pub(crate) children: Option3<Box<ExceptionEventSpec>>
 }
 
@@ -82,11 +89,13 @@ impl ExceptionEventSpec {
         Self {
             ex_type: Option3::Default,
             custom_message: None,
+            location: Option3::Default,
             timestamp: Option3::Default,
             backtrace: Option3::Default,
-            escaped: None,
             attachments: vec![],
             children: Option3::Default,
+            attributes: false,
+            extra_attributes: vec![],
         }
     }
 
@@ -98,11 +107,9 @@ impl ExceptionEventSpec {
             Option3::Specific(s) => other.set_ex_type(s),
         };
 
-        other = if let Some(msg) = self.custom_message {
-            other.custom_message(msg)
-        } else {
-            other
-        };
+        if let Some(msg) = self.custom_message {
+            other = other.custom_message(msg)
+        }
 
         other = match self.timestamp {
             Option3::Default => other,
@@ -117,16 +124,18 @@ impl ExceptionEventSpec {
             Option3::Specific(bt) => other.override_backtrace(bt),
         };
 
-        other = match self.escaped {
-            Some(has_escaped) => other.escaped(has_escaped),
-            _ => other
-        };
+        if self.attributes {
+            other = other.attributes()
+        }
+
+        for at in self.extra_attributes {
+            other = other.add_attribute(at.key, at.value)
+        }
 
         for at in self.attachments {
             other = match at {
                 AttachmentAction::Smart() => other.attachments(),
                 AttachmentAction::All() => other.all_attachments(),
-                AttachmentAction::Custom(string_value) => other.add_attacment(string_value),
                 AttachmentAction::OfType(type_id) => other.attachments_of_type_id(type_id),
             }
         }
@@ -150,11 +159,6 @@ pub(crate) enum Option3<T> {
 }
 
 impl ExceptionEventConfig for &mut ExceptionEventSpec {
-    fn escaped(self, has_escaped: bool) -> Self {
-        self.escaped = Some(has_escaped);
-        self
-    }
-
     fn ex_type(self) -> Self {
         self.ex_type = Option3::Inferred;
         self
@@ -185,13 +189,18 @@ impl ExceptionEventConfig for &mut ExceptionEventSpec {
         self
     }
 
-    fn recurse(self) -> Self {
-        self.children = Option3::Inferred;
+    fn location(self) -> Self {
+        self.location = Option3::Inferred;
         self
     }
 
-    fn add_attacment(self, at: impl Into<StringValue>) -> Self {
-        self.attachments.push(AttachmentAction::Custom(at.into()));
+    fn set_location(self, location: impl Into<StringValue>) -> Self {
+        self.location = Option3::Specific(loc.into());
+        self
+    }
+
+    fn recurse(self) -> Self {
+        self.children = Option3::Inferred;
         self
     }
 
@@ -223,6 +232,15 @@ impl ExceptionEventConfig for &mut ExceptionEventSpec {
     fn override_backtrace(self, backtrace: String) -> Self {
         self.backtrace = Option3::Specific(backtrace);
         self
+    }
+    
+    fn attributes(self) -> Self {
+        self.attributes = true;
+        self
+    }
+    
+    fn add_attribute(self, key: impl Into<Key>, value: impl Into<Value>) -> Self {
+        todo!()
     }
 }
 
@@ -260,14 +278,6 @@ impl ExceptionEventConfig for ExceptionEventSpec {
         (&mut self).override_backtrace(backtrace); self    
     }
 
-    fn escaped(mut self, has_escaped: bool) -> Self {
-        (&mut self).escaped(has_escaped); self
-    }
-
-    fn add_attacment(mut self, at: impl Into<StringValue>) -> Self {
-        (&mut self).add_attacment(at); self
-    }
-
     fn all_attachments(mut self) -> Self {
         (&mut self).all_attachments(); self
     }
@@ -286,6 +296,22 @@ impl ExceptionEventConfig for ExceptionEventSpec {
 
     fn children(mut self, actions: ExceptionEventSpec) -> Self {
         (&mut self).children(actions); self
+    }
+    
+    fn attributes(mut self) -> Self {
+        (&mut self).attributes(); self
+    }
+    
+    fn add_attribute(mut self, key: impl Into<Key>, value: impl Into<Value>) -> Self {
+        (&mut self).add_attribute(key, value); self
+    }
+    
+    fn set_location(mut self, loc: Location) -> Self {
+        (&mut self).set_location(loc); self
+    }
+    
+    fn location(mut self) -> Self {
+        (&mut self).location(); self
     }
 }
 
