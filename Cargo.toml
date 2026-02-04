@@ -6,11 +6,11 @@ edition = "2024"
 [dependencies]
 tokio.version = "1.48"
 tokio.features = [ "rt", "rt-multi-thread", "macros" ]
-rootcause = "0.11"
-rootcause-backtrace = "0.11"
+rootcause = "0.11.1"
+rootcause-backtrace = "0.11.1"
 chrono = "0.4.42"
 opentelemetry.version = "0.31"
-opentelemetry.features = [ "futures" ]
+opentelemetry.features = [ "futures", "trace" ]
 opentelemetry-semantic-conventions = "0.31"
 opentelemetry_sdk = "0.31"
 opentelemetry-stdout = "0.31"

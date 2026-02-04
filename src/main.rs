@@ -1,7 +1,7 @@
 #![allow(unused)]
 
 mod attachments;
-mod event_builder;
+mod event;
 mod setup;
 
 use std::thread::current;
@@ -9,16 +9,19 @@ use std::thread::current;
 use opentelemetry::{
     Context,
     global::{self, ObjectSafeSpan, ObjectSafeTracerProvider},
-    trace::{FutureExt, Span, TraceContextExt, Tracer},
+    trace::{FutureExt, Span, SpanContext, TraceContextExt, Tracer},
 };
 use rootcause::{Report, handlers, hooks::Hooks, markers::Mutable, report};
+use rootcause_backtrace::{Backtrace, BacktraceCollector};
 use tokio;
 
-use crate::{attachments::ReportTimestamps, setup::*};
+use crate::{attachments::*, event::*, setup::*};
 
 #[tokio::main]
 async fn main() -> Result<(), Report> {
     Hooks::new()
+        .report_creation_hook(BacktraceCollector::new_from_env())
+        .report_creation_hook(ReportOTelSpans)
         .attachment_collector(ReportTimestamps)
         .install()
         .expect("Failed to install Rootcause hooks");
@@ -38,11 +41,12 @@ async fn main() -> Result<(), Report> {
 }
 
 async fn do_report_things() -> Result<(), Report> {
-    let mut rep = Report::<i32>::new_custom::<handlers::Display>(10i32);
-
-    rep = rep.attach("This is a test");
-
     let ctx = Context::current().attach();
+
+    let mut rep = report!("Something went wrong!");
+
+    rep.record_with_current_span();
+    eprintln!("{}", rep);
 
     Ok(())
 }

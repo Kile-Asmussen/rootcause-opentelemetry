@@ -452,9 +452,9 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "rootcause"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b2fa24b30d915f807d1a14eb9eb0947fad76d6e63f165f3969e61a2942a928"
+checksum = "1a751633dcb95a6b1c954f0fa15c2afd9b4802640f8045432f68a1f4bde4b871"
 dependencies = [
  "hashbrown",
  "indexmap",
@@ -465,9 +465,9 @@ dependencies = [
 
 [[package]]
 name = "rootcause-backtrace"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eecc41897edea1fd151dacf7081ada3515e91c4f94a486595114057e1a95ed9"
+checksum = "0bf40d12af39b56a9e2523fdb6d81c38d6df34e6e00f73903a65ac9d0de4cdc0"
 dependencies = [
  "backtrace",
  "regex",
@@ -477,9 +477,9 @@ dependencies = [
 
 [[package]]
 name = "rootcause-internals"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15e09e790e6a1ade68d035e081be5054b03b9329a7b568ea5707c4395053b778"
+checksum = "d9eeddca0d656f1a58ce3fc3f41b0b877a7e760460108712ad39b60181fdcb3e"
 dependencies = [
  "triomphe",
 ]
