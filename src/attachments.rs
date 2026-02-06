@@ -44,11 +44,12 @@ impl<T: 'static> AttachmentHandler<T> for Invisible {
     }
 }
 
-pub struct ReportOTelSpans;
-impl ReportCreationHook for ReportOTelSpans {
+pub struct OTelMetadataCollector;
+impl ReportCreationHook for OTelMetadataCollector {
     fn on_local_creation(&self, mut report: ReportMut<'_, rootcause::markers::Dynamic, Local>) {
         report = report.attach_custom::<Invisible, _>(SystemTime::now());
         let ctx = Context::current();
+        eprintln!("Context in local hook: {:?}", ctx);
         let span = ctx.span();
         let span_ctx = span.span_context();
         if span_ctx.is_valid() {
@@ -62,6 +63,7 @@ impl ReportCreationHook for ReportOTelSpans {
     ) {
         report = report.attach_custom::<Invisible, _>(SystemTime::now());
         let ctx = Context::current();
+        eprintln!("Context in sendsync hook: {:?}", ctx);
         let span = ctx.span();
         let span_ctx = span.span_context();
         if span_ctx.is_valid() {
@@ -76,7 +78,7 @@ impl AttachmentHandler<SpanContext> for SpanContextHandler {
     fn display(value: &SpanContext, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             formatter,
-            "00-{:x}-{:x}-{:x}",
+            "00-{:x}-{:x}-{:02x}",
             value.trace_id(),
             value.span_id(),
             value.trace_flags(),
@@ -117,32 +119,32 @@ impl AttachmentHandler<SpanContext> for SpanContextHandler {
 }
 
 pub trait AttachmentsExt {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<A>>;
+    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>>;
     fn find_attachment_inner<A: 'static>(&self) -> Option<&A> {
         self.find_attachment::<A>().map(|a| a.inner())
     }
 }
 
 impl<T: 'static> AttachmentsExt for ReportAttachments<T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<A>> {
+    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
         self.iter().find_map(|a| a.downcast_attachment())
     }
 }
 
 impl<C: 'static + ?Sized, O: 'static, T: 'static> AttachmentsExt for Report<C, O, T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<A>> {
+    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
         self.attachments().find_attachment::<A>()
     }
 }
 
 impl<'a, C: 'static + ?Sized, O: 'static, T: 'static> AttachmentsExt for ReportRef<'a, C, O, T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<A>> {
+    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
         self.attachments().find_attachment::<A>()
     }
 }
 
 impl<'a, C: 'static + ?Sized, T: 'static> AttachmentsExt for ReportMut<'a, C, T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<A>> {
+    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
         self.attachments().find_attachment::<A>()
     }
 }
