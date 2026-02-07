@@ -11,21 +11,21 @@ use std::{
 };
 
 use opentelemetry::{
-    Context, InstrumentationScope, InstrumentationScopeBuilder,
+    Context, ContextGuard, InstrumentationScope, InstrumentationScopeBuilder, KeyValue,
     global::{self, BoxedSpan, BoxedTracer, ObjectSafeSpan, ObjectSafeTracer},
     logs::{LogRecord, Logger, LoggerProvider},
+    metrics::MeterProvider,
     trace::{
-        FutureExt, Span, SpanBuilder, SpanContext, TraceContextExt, Tracer, TracerProvider,
+        FutureExt, Span, SpanBuilder, SpanContext, Status, TraceContextExt, Tracer, TracerProvider,
         noop::NoopSpan,
     },
 };
-use opentelemetry_sdk::logs::{SdkLogRecord, SdkLogger};
-use rootcause::{
-    Report, handlers,
-    hooks::{Hooks, builtin_hooks::location::Location},
-    markers::Mutable,
-    report,
+use opentelemetry_sdk::{
+    logs::{SdkLogRecord, SdkLogger},
+    trace::{self as trace_sdk, SdkTracerProvider},
 };
+use opentelemetry_semantic_conventions::attribute;
+use rootcause::{Report, handlers, hooks::Hooks, markers::SendSync, prelude::*, report};
 use rootcause_backtrace::{Backtrace, BacktraceCollector};
 use tokio;
 
@@ -39,58 +39,118 @@ async fn main() -> Result<(), Report> {
         .install()
         .expect("Failed to install Rootcause hooks");
 
-    let (trace_system, logs_system) = setup_system();
+    let (trace_system, logs_system, metrics_system) = setup_system();
     let scope = InstrumentationScope::builder("otel-example").build();
     let logger = logs_system.logger_with_scope(scope.clone());
-    let tracer = global::tracer_with_scope(scope.clone());
+    let tracer = trace_system.tracer_with_scope(scope.clone());
+    let meter = metrics_system.meter_with_scope(scope.clone());
 
-    {
-        let _ctx = Context::current()
-            .with_span(tracer.start("global-span"))
-            .with_value(logger)
-            .with_value(tracer)
-            .attach();
+    let context = Context::new()
+        .with_value(logger)
+        .with_value(tracer)
+        .with_value(meter);
 
-        do_report_things().with_current_context().await?;
-    }
+    run()
+        .with_context(context.enter_span("run", vec![]))
+        .await
+        .map_err(|rep| {
+            eprintln!("{}", rep);
+        });
 
     logs_system.force_flush();
     trace_system.force_flush();
-    logs_system.shutdown()?;
-    trace_system.shutdown()?;
+    metrics_system.force_flush();
+
+    [
+        logs_system.shutdown(),
+        trace_system.shutdown(),
+        metrics_system.shutdown(),
+    ]
+    .into_iter()
+    .collect_reports_vec::<SendSync>()
+    .context("Shutdown failed")
+    .map_err(|rep| eprintln!("{}", rep));
+
+    Ok(())
+}
+
+fn new_span(ctx: &Context, name: &'static str) -> trace_sdk::Span {
+    ctx.get::<<SdkTracerProvider as TracerProvider>::Tracer>()
+        .expect("No tracing was configured")
+        .start_with_context(name, ctx)
+}
+
+trait ContextExt {
+    fn new_span(&self, name: &'static str, attributes: Vec<KeyValue>) -> trace_sdk::Span;
+    fn enter_span(&self, name: &'static str, attributes: Vec<KeyValue>) -> Self;
+}
+
+impl ContextExt for Context {
+    fn enter_span(&self, name: &'static str, attributes: Vec<KeyValue>) -> Context {
+        self.with_span(self.new_span(name, attributes))
+    }
+
+    fn new_span(&self, name: &'static str, attributes: Vec<KeyValue>) -> trace_sdk::Span {
+        self.get::<<SdkTracerProvider as TracerProvider>::Tracer>()
+            .expect("No tracing was configured")
+            .start_with_context(name, self)
+    }
+}
+
+async fn run() -> Result<(), Report> {
+    let ctx = Context::current();
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    inner()
+        .with_context(ctx.enter_span("inner", vec![]))
+        .await?;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    ctx.span().set_status(Status::Ok);
+
+    ctx.span().end();
+
+    Ok(())
+}
+
+async fn inner() -> Result<(), Report> {
+    let ctx = Context::current();
+
+    ctx.span().add_event("something.happened.2", vec![]);
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    ctx.span().set_status(Status::Ok);
+
+    ctx.span().end();
     Ok(())
 }
 
 async fn do_report_things() -> Result<(), Report> {
-    eprintln!("Context in do_report_things {:?}", Context::current());
-
     Context::current().span().add_event("Test", vec![]);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let mut rep = {
-        let _ctx = if let Some(tracer) = Context::current().get::<BoxedTracer>() {
-            Context::current()
-                .with_span(tracer.start("nested-span"))
-                .attach()
+    {
+        let ctx = if let Some(tracer) =
+            Context::current().get::<<SdkTracerProvider as TracerProvider>::Tracer>()
+        {
+            Context::current().with_span(tracer.start("nested-span"))
         } else {
-            Context::current().attach()
-        };
+            Context::current()
+        }
+        .attach();
 
-        create_report().with_current_context().await
+        create_report().with_current_context().await;
     };
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    Context::current().span().record_error_report_event(&rep);
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     Ok(())
 }
 
-async fn create_report() -> Report {
+async fn create_report() {
     Context::current().span().add_event("Test 2", vec![]);
-
-    report!("Something went wrong!")
 }
