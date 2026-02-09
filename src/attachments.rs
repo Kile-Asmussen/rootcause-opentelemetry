@@ -20,7 +20,6 @@ use rootcause::{
 };
 
 #[derive(Debug, Default, Clone, Copy)]
-#[allow(unused, reason = "used implicitly")]
 pub(crate) struct Invisible;
 impl<T: 'static> AttachmentHandler<T> for Invisible {
     fn display(_value: &T, _formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
