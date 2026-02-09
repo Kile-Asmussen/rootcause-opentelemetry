@@ -1,13 +1,11 @@
-use core::fmt;
 use std::{
-    fmt::{Debug, Write, write},
-    marker::PhantomData,
+    fmt::{Debug, Write},
     time::SystemTime,
 };
 
 use opentelemetry::{
-    Context, SpanId,
-    trace::{Span, SpanContext, TraceContextExt, Tracer},
+    Context,
+    trace::{SpanContext, TraceContextExt},
 };
 use rootcause::{
     Report, ReportMut, ReportRef,
@@ -15,20 +13,21 @@ use rootcause::{
         self, AttachmentFormattingPlacement, AttachmentFormattingStyle, AttachmentHandler,
         FormattingFunction,
     },
-    hooks::report_creation::{AttachmentCollector, ReportCreationHook},
-    markers::{Local, Mutable, ObjectMarkerFor, SendSync},
-    report_attachment::{ReportAttachment, ReportAttachmentRef},
+    hooks::report_creation::ReportCreationHook,
+    markers::{Local, SendSync},
+    report_attachment::ReportAttachmentRef,
     report_attachments::ReportAttachments,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct Invisible;
+#[derive(Debug, Default, Clone, Copy)]
+#[allow(unused, reason = "used implicitly")]
+pub(crate) struct Invisible;
 impl<T: 'static> AttachmentHandler<T> for Invisible {
-    fn display(value: &T, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn display(_value: &T, _formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Ok(())
     }
 
-    fn debug(value: &T, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn debug(_value: &T, _formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Ok(())
     }
 
@@ -44,16 +43,16 @@ impl<T: 'static> AttachmentHandler<T> for Invisible {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
 pub struct OTelMetadataCollector;
 impl ReportCreationHook for OTelMetadataCollector {
     fn on_local_creation(&self, mut report: ReportMut<'_, rootcause::markers::Dynamic, Local>) {
         report = report.attach_custom::<Invisible, _>(SystemTime::now());
         let ctx = Context::current();
-        eprintln!("Context in local hook: {:?}", ctx);
         let span = ctx.span();
         let span_ctx = span.span_context();
         if span_ctx.is_valid() {
-            report.attach_custom::<SpanContextHandler, _>(span_ctx.clone());
+            let _ = report.attach_custom::<SpanContextHandler, _>(span_ctx.clone());
         }
     }
 
@@ -63,11 +62,10 @@ impl ReportCreationHook for OTelMetadataCollector {
     ) {
         report = report.attach_custom::<Invisible, _>(SystemTime::now());
         let ctx = Context::current();
-        eprintln!("Context in sendsync hook: {:?}", ctx);
         let span = ctx.span();
         let span_ctx = span.span_context();
         if span_ctx.is_valid() {
-            report.attach_custom::<SpanContextHandler, _>(span_ctx.clone());
+            let _ = report.attach_custom::<SpanContextHandler, _>(span_ctx.clone());
         }
     }
 }
