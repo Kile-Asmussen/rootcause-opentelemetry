@@ -6,9 +6,24 @@ use opentelemetry::{
     trace::{SpanContext, TraceContextExt},
 };
 
-use crate::utilities::{AsReportRef, AttachmentsExt, attributes, timestamp};
+use crate::utilities::{AsReportRef, AttachmentsExt, EXCEPTION, attributes, timestamp};
 
+/// Extension trait for loggers to format [`Report`](rootcause::Report)s as
+/// log records.
 pub trait LoggerExt: Sized {
+    /// Emit a log event corresponding to a [`Report`](rootcause::Report).
+    ///
+    /// ## Attributes & Details
+    /// - Event name is `exception`
+    /// - Severity is set to `ERROR` ()
+    /// - Observed timestamp of the event is given by a [`SystemTime`](std::time::SystemTime)-typed attachment, or defaults to [`now()`](std::time::SystemTime::now) if not found.
+    /// - The trace context is taken
+    /// - `exception.type` is [`.current_context_type_name()`](rootcause::Report::current_context_type_name).
+    /// - `exception.message` is [`.format_current_context().to_string()`](rootcause::Report::format_current_context).
+    /// - `exception.stacktrace` is just `.to_string()` of the [`Report`](rootcause::Report) itself
+    ///
+    /// [`SystemTime`](std::time::SystemTime) attachments are
+    /// provided report creation hook [`OpenTelemetryMetadataCollector`](crate::attachments::OpenTelemetryMetadataCollector).
     fn emit_error_report(&self, rep: &impl AsReportRef);
 }
 
@@ -16,7 +31,7 @@ impl<L: Logger + Sized> LoggerExt for L {
     fn emit_error_report(&self, rep: &impl AsReportRef) {
         let rep = rep.as_report_ref();
         let mut record = self.create_log_record();
-        record.set_event_name("exception");
+        record.set_event_name(EXCEPTION);
         record.set_observed_timestamp(timestamp(rep));
         record.set_timestamp(SystemTime::now());
 

@@ -11,7 +11,10 @@ use rootcause::{
 
 pub const EXCEPTION: &'static str = "exception";
 
+/// Trait for getting the most general type of [`ReportRef`] from
+/// anything [`Report`]-related.
 pub trait AsReportRef {
+    /// Get a universally-obtainable [`ReportRef`].
     fn as_report_ref(&self) -> ReportRef<'_, Dynamic, Uncloneable, Local>;
 }
 
@@ -33,7 +36,7 @@ impl<'a, C: ?Sized, T> AsReportRef for ReportMut<'a, C, T> {
     }
 }
 
-pub fn attributes_brief(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> Vec<KeyValue> {
+pub(crate) fn attributes_brief(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> Vec<KeyValue> {
     let rep = rep.as_report_ref();
     vec![
         KeyValue::new(attribute::EXCEPTION_TYPE, rep.current_context_type_name()),
@@ -44,7 +47,7 @@ pub fn attributes_brief(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> Vec<
     ]
 }
 
-pub fn attributes(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> Vec<KeyValue> {
+pub(crate) fn attributes(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> Vec<KeyValue> {
     let rep = rep.as_report_ref();
     vec![
         KeyValue::new(attribute::EXCEPTION_TYPE, rep.current_context_type_name()),
@@ -56,13 +59,13 @@ pub fn attributes(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> Vec<KeyVal
     ]
 }
 
-pub fn timestamp(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> SystemTime {
+pub(crate) fn timestamp(rep: ReportRef<'_, Dynamic, Uncloneable, Local>) -> SystemTime {
     rep.find_attachment_inner()
         .cloned()
         .unwrap_or_else(SystemTime::now)
 }
 
-pub trait AttachmentsExt {
+pub(crate) trait AttachmentsExt {
     fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>>;
     fn find_attachment_inner<A: 'static>(&self) -> Option<&A> {
         self.find_attachment::<A>().map(|a| a.inner())
