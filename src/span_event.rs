@@ -16,10 +16,6 @@ use crate::utilities::{
 
 /// Extension trait for the [`SpanRef<'_>`] type
 /// which is returned by [`Context::span`](opentelemetry::context::Context::span).
-///
-/// ```rust
-/// todo!()
-/// ```
 pub trait SpanRefReportExt: Sized {
     /// Returns a builder-pattern for turning reports into events on a span.
     ///
