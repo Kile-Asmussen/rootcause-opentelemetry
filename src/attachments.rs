@@ -1,5 +1,7 @@
+use core::fmt;
 use std::{
     fmt::{Debug, Write},
+    i32,
     time::SystemTime,
 };
 
@@ -8,30 +10,46 @@ use opentelemetry::{
     trace::{SpanContext, TraceContextExt},
 };
 use rootcause::{
-    Report, ReportMut, ReportRef,
+    ReportMut,
     handlers::{
         self, AttachmentFormattingPlacement, AttachmentFormattingStyle, AttachmentHandler,
         FormattingFunction,
     },
-    hooks::report_creation::ReportCreationHook,
-    markers::{Local, SendSync},
+    hooks::{attachment_formatter::AttachmentFormatterHook, report_creation::ReportCreationHook},
+    markers::{self, Local, SendSync},
     report_attachment::ReportAttachmentRef,
-    report_attachments::ReportAttachments,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Invisible;
-impl<T: 'static> AttachmentHandler<T> for Invisible {
-    fn display(_value: &T, _formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+pub struct OpenTelemetryMetadataCollector<const TIMESTAMPS: bool = true> {
+    _priv: (),
+}
+
+impl OpenTelemetryMetadataCollector<true> {
+    pub fn new() -> Self {
+        Self { _priv: () }
+    }
+}
+
+impl OpenTelemetryMetadataCollector<false> {
+    pub fn no_timestamps() -> Self {
+        Self { _priv: () }
+    }
+}
+
+impl<const TIMESTAMPS: bool> AttachmentHandler<SystemTime>
+    for OpenTelemetryMetadataCollector<TIMESTAMPS>
+{
+    fn display(_value: &SystemTime, _formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(())
     }
 
-    fn debug(_value: &T, _formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn debug(_value: &SystemTime, _formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(())
     }
 
     fn preferred_formatting_style(
-        _value: &T,
+        _value: &SystemTime,
         report_formatting_function: handlers::FormattingFunction,
     ) -> handlers::AttachmentFormattingStyle {
         handlers::AttachmentFormattingStyle {
@@ -42,37 +60,10 @@ impl<T: 'static> AttachmentHandler<T> for Invisible {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct OTelMetadataCollector;
-impl ReportCreationHook for OTelMetadataCollector {
-    fn on_local_creation(&self, mut report: ReportMut<'_, rootcause::markers::Dynamic, Local>) {
-        report = report.attach_custom::<Invisible, _>(SystemTime::now());
-        let ctx = Context::current();
-        let span = ctx.span();
-        let span_ctx = span.span_context();
-        if span_ctx.is_valid() {
-            let _ = report.attach_custom::<SpanContextHandler, _>(span_ctx.clone());
-        }
-    }
-
-    fn on_sendsync_creation(
-        &self,
-        mut report: ReportMut<'_, rootcause::markers::Dynamic, SendSync>,
-    ) {
-        report = report.attach_custom::<Invisible, _>(SystemTime::now());
-        let ctx = Context::current();
-        let span = ctx.span();
-        let span_ctx = span.span_context();
-        if span_ctx.is_valid() {
-            let _ = report.attach_custom::<SpanContextHandler, _>(span_ctx.clone());
-        }
-    }
-}
-
-pub struct SpanContextHandler;
-
-impl AttachmentHandler<SpanContext> for SpanContextHandler {
-    fn display(value: &SpanContext, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl<const TIMESTAMPS: bool> AttachmentHandler<SpanContext>
+    for OpenTelemetryMetadataCollector<TIMESTAMPS>
+{
+    fn display(value: &SpanContext, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
             "00-{:x}-{:x}-{:02x}",
@@ -89,7 +80,7 @@ impl AttachmentHandler<SpanContext> for SpanContextHandler {
         Ok(())
     }
 
-    fn debug(value: &SpanContext, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn debug(value: &SpanContext, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         Debug::fmt(value, formatter)
     }
 
@@ -115,33 +106,41 @@ impl AttachmentHandler<SpanContext> for SpanContextHandler {
     }
 }
 
-pub trait AttachmentsExt {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>>;
-    fn find_attachment_inner<A: 'static>(&self) -> Option<&A> {
-        self.find_attachment::<A>().map(|a| a.inner())
+impl<const TIMESTAMPS: bool> ReportCreationHook for OpenTelemetryMetadataCollector<TIMESTAMPS> {
+    fn on_local_creation(&self, mut report: ReportMut<'_, markers::Dynamic, Local>) {
+        if TIMESTAMPS {
+            report = report.attach_custom::<OpenTelemetryMetadataCollector, _>(SystemTime::now());
+        }
+        let ctx = Context::current();
+        let span = ctx.span();
+        let span_ctx = span.span_context();
+        if span_ctx.is_valid() {
+            let _ = report.attach_custom::<OpenTelemetryMetadataCollector, _>(span_ctx.clone());
+        }
+    }
+
+    fn on_sendsync_creation(&self, mut report: ReportMut<'_, markers::Dynamic, SendSync>) {
+        report = report.attach_custom::<OpenTelemetryMetadataCollector, _>(SystemTime::now());
+        let ctx = Context::current();
+        let span = ctx.span();
+        let span_ctx = span.span_context();
+        if span_ctx.is_valid() {
+            let _ = report.attach_custom::<OpenTelemetryMetadataCollector, _>(span_ctx.clone());
+        }
     }
 }
 
-impl<T: 'static> AttachmentsExt for ReportAttachments<T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
-        self.iter().find_map(|a| a.downcast_attachment())
-    }
-}
-
-impl<C: 'static + ?Sized, O: 'static, T: 'static> AttachmentsExt for Report<C, O, T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
-        self.attachments().find_attachment::<A>()
-    }
-}
-
-impl<'a, C: 'static + ?Sized, O: 'static, T: 'static> AttachmentsExt for ReportRef<'a, C, O, T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
-        self.attachments().find_attachment::<A>()
-    }
-}
-
-impl<'a, C: 'static + ?Sized, T: 'static> AttachmentsExt for ReportMut<'a, C, T> {
-    fn find_attachment<A: 'static>(&self) -> Option<ReportAttachmentRef<'_, A>> {
-        self.attachments().find_attachment::<A>()
+pub struct HideTraceAttachments;
+impl AttachmentFormatterHook<SpanContext> for HideTraceAttachments {
+    fn preferred_formatting_style(
+        &self,
+        _attachment: ReportAttachmentRef<'_, markers::Dynamic>,
+        report_formatting_function: FormattingFunction,
+    ) -> AttachmentFormattingStyle {
+        AttachmentFormattingStyle {
+            placement: AttachmentFormattingPlacement::Hidden,
+            function: report_formatting_function,
+            priority: i32::MIN,
+        }
     }
 }

@@ -31,7 +31,9 @@ use rootcause::{
 };
 use rootcause_backtrace::{Backtrace, BacktraceCollector};
 use rootcause_opentelemetry::{
-    attachments::OTelMetadataCollector, log_event::LoggerExt, span_event::SpanRefReportExt,
+    attachments::{HideTraceAttachments, OpenTelemetryMetadataCollector},
+    log_event::LoggerExt,
+    span_event::SpanRefReportExt,
 };
 use tokio;
 
@@ -39,7 +41,8 @@ use tokio;
 async fn main() -> Result<(), Report> {
     Hooks::new()
         .report_creation_hook(BacktraceCollector::new_from_env())
-        .report_creation_hook(OTelMetadataCollector)
+        .report_creation_hook(OpenTelemetryMetadataCollector::new())
+        .attachment_formatter(HideTraceAttachments)
         .install()
         .expect("Failed to install rootcause hooks");
 

@@ -6,10 +6,7 @@ use opentelemetry::{
     trace::{SpanContext, TraceContextExt},
 };
 
-use crate::{
-    attachments::AttachmentsExt,
-    utilities::{AsReportRef, attributes, timestamp},
-};
+use crate::utilities::{AsReportRef, AttachmentsExt, attributes, timestamp};
 
 pub trait LoggerExt: Sized {
     fn emit_error_report(&self, rep: &impl AsReportRef);

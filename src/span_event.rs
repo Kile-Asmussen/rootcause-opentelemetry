@@ -9,9 +9,8 @@ use rootcause::{
     markers::{Dynamic, Local, Uncloneable},
 };
 
-use crate::{
-    attachments::AttachmentsExt,
-    utilities::{AsReportRef, EXCEPTION, attributes, attributes_brief, timestamp},
+use crate::utilities::{
+    AsReportRef, AttachmentsExt, EXCEPTION, attributes, attributes_brief, timestamp,
 };
 
 pub trait SpanRefReportExt: Sized {
