@@ -63,7 +63,8 @@ async fn main() -> Result<(), Report> {
             c.span()
                 .record_error_report(&rep.context("something else bad"))
                 .link_child_report_spans()
-                .as_event_brief();
+                .as_event_brief()
+                .with_error_status();
         });
     });
 

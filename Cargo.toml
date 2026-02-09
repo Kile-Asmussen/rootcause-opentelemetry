@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-logs = ["opentelemetry_sdk/logs", "opentelemetry/logs"]
+logs = ["opentelemetry/logs"]
 
 [dependencies]
 tokio.version = "1.48"
@@ -17,5 +17,9 @@ opentelemetry-semantic-conventions = "0.31"
 
 [dev-dependencies]
 opentelemetry_sdk.version = "0.31"
-opentelemetry_sdk.features = [ "trace" ]
+opentelemetry_sdk.features = [ "trace", "logs" ]
 opentelemetry-stdout = "0.31"
+
+[[example]]
+name = "full_feature"
+required-features = ["logs"]
